@@ -19,11 +19,6 @@ jobs:
         run: |
           sbt 'project kafka' assembly
           sbt 'project kinesis' assembly
-          sbt 'project nsq' assembly
-          sbt 'project pubsub' assembly
-          sbt 'project sqs' assembly
-          sbt 'project stdout' assembly
-          sbt 'project rabbitmq' assembly
       - name: Get current version
         id: ver
         run: |
@@ -53,12 +48,7 @@ jobs:
       matrix:
         platform:
           - kinesis
-          - sqs
-          - pubsub
           - kafka
-          - nsq
-          - stdout
-          - rabbitmq
         include:
           - suffix: ""
           - suffix: -experimental
@@ -92,7 +82,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v3
         with:
-          images: snowplow/scala-stream-collector-${{ matrix.platform }}${{ matrix.suffix }}
+          images: pragmatikai/scala-stream-collector-${{ matrix.platform }}${{ matrix.suffix }}
           tags: |
             type=raw,value=latest,enable=${{ !contains(steps.ver.outputs.project_version, 'rc') }}
             type=raw,value=latest-focal,enable=${{ !contains(steps.ver.outputs.project_version, 'rc') }}
@@ -141,17 +131,17 @@ jobs:
           tags: ${{ steps.distroless-meta.outputs.tags }}
           push: true
 
-      - name: Build local distroless image, which is needed to run Snyk
-        if: matrix.run_snyk
-        run: sbt "project ${{ matrix.platform }}Distroless" docker:publishLocal
-      - name: Show local docker images
-        run: docker images
-      - name: Run Snyk to check for vulnerabilities
-        uses: snyk/actions/docker@master
-        if: matrix.run_snyk
-        with:
-          image: "snowplow/scala-stream-collector-${{ matrix.platform }}:${{ github.ref_name }}-distroless"
-          args: "--app-vulns --org=data-processing-new"
-          command: monitor
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      # - name: Build local distroless image, which is needed to run Snyk
+      #   if: matrix.run_snyk
+      #   run: sbt "project ${{ matrix.platform }}Distroless" docker:publishLocal
+      # - name: Show local docker images
+      #   run: docker images
+      # - name: Run Snyk to check for vulnerabilities
+      #   uses: snyk/actions/docker@master
+      #   if: matrix.run_snyk
+      #   with:
+      #     image: "snowplow/scala-stream-collector-${{ matrix.platform }}:${{ github.ref_name }}-distroless"
+      #     args: "--app-vulns --org=data-processing-new"
+      #     command: monitor
+      #   env:
+      #     SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
