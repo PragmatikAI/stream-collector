@@ -54,13 +54,13 @@ lazy val commonExclusions = Seq(
 
 lazy val buildInfoSettings = Seq(
   buildInfoPackage := "com.snowplowanalytics.snowplow.collectors.scalastream.generated",
-  buildInfoKeys := Seq[BuildInfoKey](organization, moduleName, name, version, "shortName" -> "osc", scalaVersion)
+  buildInfoKeys := Seq[BuildInfoKey](organization, moduleName, name, version, "shortName" -> "pragmatik", scalaVersion)
 )
 
 lazy val buildSettings = Seq(
-  organization := "com.snowplowanalytics",
-  name := "opensnowcat-collector",
-  description := "Scala Stream Collector for Snowplow raw events",
+  organization := "ai.pragmatik",
+  name := "pragmatik-collector",
+  description := "Pragmatik Collector for Snowplow-compatible raw events",
   scalaVersion := "2.12.19",
   javacOptions := Seq("-source", "11", "-target", "11"),
   resolvers ++= Dependencies.resolutionRepos
@@ -74,7 +74,9 @@ lazy val dynVerSettings = Seq(
 lazy val dockerSettings = Seq(
   // Override sbt-snowplow-release's default (eclipse-temurin:11-jre-focal):
   // Ubuntu 20.04 (focal) left standard support in April 2025
-  dockerBaseImage := "eclipse-temurin:21-jre-noble"
+  dockerBaseImage := "eclipse-temurin:21-jre-noble",
+  Docker / dockerRepository := Some("pragmatikai"),
+  Docker / maintainer := "Pragmatik"
 )
 
 lazy val allSettings = buildSettings ++
@@ -91,15 +93,15 @@ lazy val root = project
   .aggregate(core, kafka, stdout, rabbitmq)
 
 lazy val core = project
-  .settings(moduleName := "opensnowcat-collector-core")
+  .settings(moduleName := "pragmatik-collector-core")
   .settings(buildSettings ++ BuildSettings.sbtAssemblySettings)
   .settings(libraryDependencies ++= commonDependencies)
   .settings(excludeDependencies ++= commonExclusions)
 
 lazy val kafkaSettings =
   allSettings ++ buildInfoSettings ++ Seq(
-    moduleName := "opensnowcat-collector-kafka",
-    Docker / packageName := "scala-stream-collector-kafka",
+    moduleName := "pragmatik-collector-kafka",
+    Docker / packageName := "pragmatik-collector-kafka",
     libraryDependencies ++= Seq(
       Dependencies.Libraries.kafkaClients,
       Dependencies.Libraries.lz4Java,
@@ -114,8 +116,8 @@ lazy val kafka = project
 
 lazy val stdoutSettings =
   allSettings ++ buildInfoSettings ++ Seq(
-    moduleName := "opensnowcat-collector-stdout",
-    Docker / packageName := "scala-stream-collector-stdout"
+    moduleName := "pragmatik-collector-stdout",
+    Docker / packageName := "pragmatik-collector-stdout"
   )
 
 lazy val stdout = project
@@ -125,8 +127,8 @@ lazy val stdout = project
 
 lazy val rabbitmqSettings =
   allSettings ++ buildInfoSettings ++ Seq(
-    moduleName := "opensnowcat-collector-rabbitmq",
-    Docker / packageName := "scala-stream-collector-rabbitmq-experimental",
+    moduleName := "pragmatik-collector-rabbitmq",
+    Docker / packageName := "pragmatik-collector-rabbitmq-experimental",
     libraryDependencies ++= Seq(Dependencies.Libraries.rabbitMQ)
   )
 

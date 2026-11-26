@@ -38,9 +38,9 @@ jobs:
           name: ${{ steps.ver.outputs.project_version }}
           tag_name: ${{ steps.ver.outputs.project_version }}
           files: |
-            kafka/target/scala-2.12/opensnowcat-collector-kafka-${{ steps.ver.outputs.project_version }}.jar
-            rabbitmq/target/scala-2.12/opensnowcat-collector-rabbitmq-${{ steps.ver.outputs.project_version }}.jar
-            stdout/target/scala-2.12/opensnowcat-collector-stdout-${{ steps.ver.outputs.project_version }}.jar
+            kafka/target/scala-2.12/pragmatik-collector-kafka-${{ steps.ver.outputs.project_version }}.jar
+            rabbitmq/target/scala-2.12/pragmatik-collector-rabbitmq-${{ steps.ver.outputs.project_version }}.jar
+            stdout/target/scala-2.12/pragmatik-collector-stdout-${{ steps.ver.outputs.project_version }}.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -81,7 +81,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: pragmatikai/scala-stream-collector-${{ matrix.platform }}${{ matrix.suffix }}
+          images: pragmatikai/pragmatik-collector-${{ matrix.platform }}${{ matrix.suffix }}
           tags: |
             type=raw,value=latest,enable=${{ !contains(steps.ver.outputs.project_version, 'rc') }}
             type=raw,value=${{ steps.ver.outputs.project_version }}

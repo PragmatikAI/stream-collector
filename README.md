@@ -1,21 +1,22 @@
-# Scala Stream Collector (Pragmatik fork)
+# Pragmatik Collector
 [![License][license-image]][license]
 
 ## Welcome
 
-A cloud-agnostic Snowplow event collector, maintained as a downstream fork of the
-[OpenSnowcat Collector](https://github.com/opensnowcat/opensnowcat-collector) (itself the
-Apache 2.0 continuation of the Snowplow Scala Stream Collector following the 2023/2024
-license changes).
+A cloud-agnostic, independently maintained Snowplow-compatible event collector.
 
-This fork is deliberately opinionated:
+This codebase originated from the [OpenSnowcat Collector](https://github.com/opensnowcat/opensnowcat-collector)
+(itself the Apache 2.0 continuation of the Snowplow Scala Stream Collector following the
+2023/2024 license changes) and is now maintained independently. Credit to the OpenSnowcat
+contributors for the Pekko HTTP migration and extensive dependency security work this
+fork builds on.
+
+This collector is deliberately opinionated:
 
 - **Sinks**: [Apache Kafka](https://kafka.apache.org/) (primary), [RabbitMQ](https://www.rabbitmq.com/) (experimental), and stdout. The AWS (Kinesis, SQS), GCP (Pub/Sub), and NSQ sinks are removed, as is the Kafka sink's optional SQS failover.
-- **Telemetry is off by default** (`telemetry.disable = true`); set `disable = false` to opt in.
-- Docker images are published to `pragmatikai/scala-stream-collector-{kafka,stdout,rabbitmq-experimental}`.
-
-To pull in upstream security updates: `git fetch opensnowcat && git merge opensnowcat/main`,
-then re-resolve the strip-down (conflicts in removed modules are always resolved by deletion).
+- **Telemetry is off by default** (`telemetry.disable = true`), and there is no default
+  telemetry endpoint; enabling it requires explicitly configuring your own.
+- Docker images are published to `pragmatikai/pragmatik-collector-{kafka,stdout,rabbitmq-experimental}`.
 
 ## Security
 
