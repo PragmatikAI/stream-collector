@@ -41,11 +41,7 @@ lazy val commonDependencies = Seq(
   Dependencies.Libraries.pekkoTestkit,
   Dependencies.Libraries.pekkoHttpTestkit,
   Dependencies.Libraries.pekkoStreamTestkit,
-  Dependencies.Libraries.specs2,
-  // Integration tests
-  Dependencies.Libraries.testcontainersIt,
-  Dependencies.Libraries.http4sClientIt,
-  Dependencies.Libraries.catsRetryIt
+  Dependencies.Libraries.specs2
 )
 
 lazy val commonExclusions = Seq(
@@ -59,33 +55,6 @@ lazy val commonExclusions = Seq(
 lazy val buildInfoSettings = Seq(
   buildInfoPackage := "com.snowplowanalytics.snowplow.collectors.scalastream.generated",
   buildInfoKeys := Seq[BuildInfoKey](organization, moduleName, name, version, "shortName" -> "osc", scalaVersion)
-)
-
-// Make package (build) metadata available within source code for integration tests.
-lazy val scalifiedSettings = Seq(
-  IntegrationTest / sourceGenerators += Def.task {
-    val file = (IntegrationTest / sourceManaged).value / "settings.scala"
-    IO.write(
-      file,
-      """package %s
-        |object ProjectMetadata {
-        |  val organization = "%s"
-        |  val name = "%s"
-        |  val version = "%s"
-        |  val dockerTag = "%s"
-        |}
-        |"""
-        .stripMargin
-        .format(
-          buildInfoPackage.value,
-          organization.value,
-          name.value,
-          version.value,
-          dockerAlias.value.tag.get
-        )
-    )
-    Seq(file)
-  }.taskValue
 )
 
 lazy val buildSettings = Seq(
@@ -112,101 +81,13 @@ lazy val allSettings = buildSettings ++
 lazy val root = project
   .in(file("."))
   .settings(buildSettings ++ dynVerSettings)
-  .aggregate(core, kinesis, pubsub, kafka, nsq, stdout, sqs, rabbitmq)
+  .aggregate(core, kafka, stdout, rabbitmq)
 
 lazy val core = project
   .settings(moduleName := "opensnowcat-collector-core")
   .settings(buildSettings ++ BuildSettings.sbtAssemblySettings)
   .settings(libraryDependencies ++= commonDependencies)
   .settings(excludeDependencies ++= commonExclusions)
-  .settings(Defaults.itSettings)
-  .configs(IntegrationTest)
-
-lazy val kinesisSettings =
-  allSettings ++ buildInfoSettings ++ Defaults.itSettings ++ scalifiedSettings ++ Seq(
-    moduleName := "opensnowcat-collector-kinesis",
-    Docker / packageName := "scala-stream-collector-kinesis",
-    libraryDependencies ++= Seq(
-      Dependencies.Libraries.kinesis,
-      Dependencies.Libraries.sts,
-      Dependencies.Libraries.sqs,
-      Dependencies.Libraries.nettyAll,
-      // integration tests dependencies
-      Dependencies.Libraries.specs2It,
-      Dependencies.Libraries.specs2CEIt
-    ),
-    IntegrationTest / test := (IntegrationTest / test).dependsOn(Docker / publishLocal).value,
-    IntegrationTest / testOnly := (IntegrationTest / testOnly).dependsOn(Docker / publishLocal).evaluated
-  )
-
-lazy val kinesis = project
-  .settings(kinesisSettings)
-  .enablePlugins(JavaAppPackaging, SnowplowDockerPlugin, BuildInfoPlugin)
-  .dependsOn(core % "test->test;compile->compile;it->it")
-  .configs(IntegrationTest)
-
-lazy val kinesisDistroless = project
-  .in(file("distroless/kinesis"))
-  .settings(sourceDirectory := (kinesis / sourceDirectory).value)
-  .settings(kinesisSettings)
-  .enablePlugins(JavaAppPackaging, SnowplowDistrolessDockerPlugin, BuildInfoPlugin)
-  .dependsOn(core % "test->test;compile->compile;it->it")
-  .configs(IntegrationTest)
-
-lazy val sqsSettings =
-  allSettings ++ buildInfoSettings ++ Seq(
-    moduleName := "opensnowcat-collector-sqs",
-    Docker / packageName := "scala-stream-collector-sqs",
-    libraryDependencies ++= Seq(
-      Dependencies.Libraries.sqs,
-      Dependencies.Libraries.sts,
-      Dependencies.Libraries.nettyAll
-    )
-  )
-
-lazy val sqs = project
-  .settings(sqsSettings)
-  .enablePlugins(JavaAppPackaging, SnowplowDockerPlugin, BuildInfoPlugin)
-  .dependsOn(core % "test->test;compile->compile")
-
-lazy val sqsDistroless = project
-  .in(file("distroless/sqs"))
-  .settings(sourceDirectory := (sqs / sourceDirectory).value)
-  .settings(sqsSettings)
-  .enablePlugins(JavaAppPackaging, SnowplowDistrolessDockerPlugin, BuildInfoPlugin)
-  .dependsOn(core % "test->test;compile->compile")
-
-lazy val pubsubSettings =
-  allSettings ++ buildInfoSettings ++ Defaults.itSettings ++ scalifiedSettings ++ Seq(
-    moduleName := "opensnowcat-collector-google-pubsub",
-    Docker / packageName := "scala-stream-collector-pubsub",
-    libraryDependencies ++= Seq(
-      Dependencies.Libraries.pubsub,
-      Dependencies.Libraries.protobuf,
-      Dependencies.Libraries.guava,
-      Dependencies.Libraries.grpcNettyShaded,
-      
-      // integration tests dependencies
-      Dependencies.Libraries.specs2It,
-      Dependencies.Libraries.specs2CEIt
-    ),
-    IntegrationTest / test := (IntegrationTest / test).dependsOn(Docker / publishLocal).value,
-    IntegrationTest / testOnly := (IntegrationTest / testOnly).dependsOn(Docker / publishLocal).evaluated
-  )
-
-lazy val pubsub = project
-  .settings(pubsubSettings)
-  .enablePlugins(JavaAppPackaging, SnowplowDockerPlugin, BuildInfoPlugin)
-  .dependsOn(core % "test->test;compile->compile;it->it")
-  .configs(IntegrationTest)
-
-lazy val pubsubDistroless = project
-  .in(file("distroless/pubsub"))
-  .settings(sourceDirectory := (pubsub / sourceDirectory).value)
-  .settings(pubsubSettings)
-  .enablePlugins(JavaAppPackaging, SnowplowDistrolessDockerPlugin, BuildInfoPlugin)
-  .dependsOn(core % "test->test;compile->compile;it->it")
-  .configs(IntegrationTest)
 
 lazy val kafkaSettings =
   allSettings ++ buildInfoSettings ++ Seq(
@@ -215,49 +96,13 @@ lazy val kafkaSettings =
     libraryDependencies ++= Seq(
       Dependencies.Libraries.kafkaClients,
       Dependencies.Libraries.lz4Java,
-      Dependencies.Libraries.mskAuth,
-      Dependencies.Libraries.nettyAll,
-      Dependencies.Libraries.jacksonCore,
-      Dependencies.Libraries.sqs,
-      Dependencies.Libraries.sts
+      Dependencies.Libraries.mskAuth
     )
   )
 
 lazy val kafka = project
   .settings(kafkaSettings)
   .enablePlugins(JavaAppPackaging, SnowplowDockerPlugin, BuildInfoPlugin)
-  .dependsOn(core % "test->test;compile->compile")
-
-lazy val kafkaDistroless = project
-  .in(file("distroless/kafka"))
-  .settings(sourceDirectory := (kafka / sourceDirectory).value)
-  .settings(kafkaSettings)
-  .enablePlugins(JavaAppPackaging, SnowplowDistrolessDockerPlugin, BuildInfoPlugin)
-  .dependsOn(core % "test->test;compile->compile")
-
-lazy val nsqSettings =
-  allSettings ++ buildInfoSettings ++ Seq(
-    moduleName := "opensnowcat-collector-nsq",
-    Docker / packageName := "scala-stream-collector-nsq",
-    libraryDependencies ++= Seq(
-      Dependencies.Libraries.nsqClient,
-      Dependencies.Libraries.jackson,
-      Dependencies.Libraries.log4j,
-      Dependencies.Libraries.guava,
-      Dependencies.Libraries.nettyAll
-    )
-  )
-
-lazy val nsq = project
-  .settings(nsqSettings)
-  .enablePlugins(JavaAppPackaging, SnowplowDockerPlugin, BuildInfoPlugin)
-  .dependsOn(core % "test->test;compile->compile")
-
-lazy val nsqDistroless = project
-  .in(file("distroless/nsq"))
-  .settings(sourceDirectory := (nsq / sourceDirectory).value)
-  .settings(nsqSettings)
-  .enablePlugins(JavaAppPackaging, SnowplowDistrolessDockerPlugin, BuildInfoPlugin)
   .dependsOn(core % "test->test;compile->compile")
 
 lazy val stdoutSettings =
@@ -271,13 +116,6 @@ lazy val stdout = project
   .enablePlugins(JavaAppPackaging, SnowplowDockerPlugin, BuildInfoPlugin)
   .dependsOn(core % "test->test;compile->compile")
 
-lazy val stdoutDistroless = project
-  .in(file("distroless/stdout"))
-  .settings(sourceDirectory := (stdout / sourceDirectory).value)
-  .settings(stdoutSettings)
-  .enablePlugins(JavaAppPackaging, SnowplowDistrolessDockerPlugin, BuildInfoPlugin)
-  .dependsOn(core % "test->test;compile->compile")
-
 lazy val rabbitmqSettings =
   allSettings ++ buildInfoSettings ++ Seq(
     moduleName := "opensnowcat-collector-rabbitmq",
@@ -288,11 +126,4 @@ lazy val rabbitmqSettings =
 lazy val rabbitmq = project
   .settings(rabbitmqSettings)
   .enablePlugins(JavaAppPackaging, SnowplowDockerPlugin, BuildInfoPlugin)
-  .dependsOn(core % "test->test;compile->compile")
-
-lazy val rabbitmqDistroless = project
-  .in(file("distroless/rabbitmq"))
-  .settings(sourceDirectory := (rabbitmq / sourceDirectory).value)
-  .settings(rabbitmqSettings)
-  .enablePlugins(JavaAppPackaging, SnowplowDistrolessDockerPlugin, BuildInfoPlugin)
   .dependsOn(core % "test->test;compile->compile")

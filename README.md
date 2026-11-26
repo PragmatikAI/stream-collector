@@ -1,16 +1,24 @@
-# OpenSnowcat Scala Stream Collector
-![GitHub Release](https://img.shields.io/github/v/release/opensnowcat/opensnowcat-collector?link=https%3A%2F%2Fgithub.com%2Fopensnowcat%2Fopensnowcat-collector%2Freleases)
-[![main](https://github.com/opensnowcat/opensnowcat-collector/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/opensnowcat/opensnowcat-collector/actions/workflows/test.yml)
+# Scala Stream Collector (Pragmatik fork)
 [![License][license-image]][license]
-
-
 
 ## Welcome
 
-The OpenSnowcat Scala Stream Collector is an open-source fork of Snowplow following the license changes in 2023 and early 2024. We're looking to sustain an analytics platform for the many businesses dependent on the rights granted by the original Apache v2.0 License.
+A cloud-agnostic Snowplow event collector, maintained as a downstream fork of the
+[OpenSnowcat Collector](https://github.com/opensnowcat/opensnowcat-collector) (itself the
+Apache 2.0 continuation of the Snowplow Scala Stream Collector following the 2023/2024
+license changes).
+
+This fork is deliberately opinionated:
+
+- **Sinks**: [Apache Kafka](https://kafka.apache.org/) (primary), [RabbitMQ](https://www.rabbitmq.com/) (experimental), and stdout. The AWS (Kinesis, SQS), GCP (Pub/Sub), and NSQ sinks are removed, as is the Kafka sink's optional SQS failover.
+- **Telemetry is off by default** (`telemetry.disable = true`); set `disable = false` to opt in.
+- Docker images are published to `pragmatikai/scala-stream-collector-{kafka,stdout,rabbitmq-experimental}`.
+
+To pull in upstream security updates: `git fetch opensnowcat && git merge opensnowcat/main`,
+then re-resolve the strip-down (conflicts in removed modules are always resolved by deletion).
 
 ## Project Resources
- - [Project Website](https://opensnowcat.io/)
+ - [OpenSnowcat Project Website](https://opensnowcat.io/)
 
 ## Security
 

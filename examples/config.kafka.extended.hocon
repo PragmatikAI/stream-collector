@@ -178,7 +178,7 @@ collector {
 
     # Enable the chosen sink by uncommenting the appropriate configuration
     sink {
-      # Choose between kinesis, sqs, google-pub-sub, kafka, nsq, or stdout.
+      # Choose between kafka, rabbitmq (experimental), or stdout.
       # To use stdout, comment or remove everything in the "collector.streams.sink" section except
       # "enabled" which should be set to "stdout".
       enabled = kafka
@@ -292,30 +292,6 @@ collector {
       # If a record is bigger, a size violation bad row is emitted instead
       # Default: 1 MB
       maxBytes = 1000000
-
-      # Optional: SQS integration for redundancy or backup
-      # When enabled, events are written to SQS only when Kafka fails (failover/backup mode)
-      #sqs {
-      #  region = "eu-central-1"
-      #  threadPoolSize = 8
-      #  startupCheckInterval = 10 seconds
-      #  maxBufferSize = 100000
-      #
-      #  # IMPORTANT: Must be FULL queue URLs (not just queue names)
-      #  # Format: https://sqs.{region}.amazonaws.com/{account-id}/{queue-name}
-      #  goodQueueUrl = "https://sqs.eu-central-1.amazonaws.com/123456789012/good-events"
-      #  badQueueUrl = "https://sqs.eu-central-1.amazonaws.com/123456789012/bad-events"
-      #
-      #  aws {
-      #    accessKey = iam
-      #    secretKey = iam
-      #  }
-      #  backoffPolicy {
-      #    minBackoff = 1000
-      #    maxBackoff = 10000
-      #    maxRetries = 10
-      #  }
-      #}
     }
 
     # Incoming events are stored in a buffer before being sent to Kinesis/Kafka.
@@ -341,12 +317,12 @@ collector {
     }
   }
 
-  # Telemetry sends heartbeat events to external pipeline.
-  # Unless disable parameter set to true, this feature will be enabled. Deleting whole section will not disable it.
+  # Telemetry sends heartbeat events to an external pipeline.
+  # Disabled by default in this fork; set disable = false to opt in.
   # Schema URI: iglu:com.snowplowanalytics.oss/oss_context/jsonschema/1-0-1
   #
   telemetry {
-      disable = false
+      disable = true
       interval = 60 minutes
 
       # Connection properties for the receiving pipeline

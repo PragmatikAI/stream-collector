@@ -65,7 +65,7 @@ collector {
   }
 
   telemetry{
-    disabled = true
+    disable = true
   }
 }
 

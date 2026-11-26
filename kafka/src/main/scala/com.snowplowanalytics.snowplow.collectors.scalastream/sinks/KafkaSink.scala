@@ -14,7 +14,6 @@ package com.snowplowanalytics.snowplow.collectors.scalastream
 package sinks
 
 import com.snowplowanalytics.snowplow.collectors.scalastream.model._
-import com.snowplowanalytics.snowplow.collectors.scalastream.sinks.sqs.SQSPublisher
 import org.apache.kafka.clients.admin.{AdminClient, AdminClientConfig}
 import org.apache.kafka.clients.producer._
 
@@ -34,7 +33,6 @@ import scala.util.{Failure, Success, Try}
   * @param bufferConfig Buffer configuration
   * @param topicName Kafka topic name
   * @param executorService Executor for async operations and health checks
-  * @param maybeSqs Optional SQS publisher for failover
   * @param enableHealthCheck Whether to run background health check (only needed for good sink)
   */
 class KafkaSink(
@@ -43,17 +41,9 @@ class KafkaSink(
   bufferConfig: BufferConfig,
   topicName: String,
   executorService: ScheduledExecutorService,
-  maybeSqs: Option[SQSPublisher],
   enableHealthCheck: Boolean = true
 ) extends Sink {
   import KafkaSink._
-
-  maybeSqs match {
-    case Some(_) =>
-      log.info(s"SQS backup for Kafka topic $topicName is enabled")
-    case None =>
-      log.info(s"No SQS backup for Kafka topic $topicName")
-  }
 
   private val ByteThreshold   = bufferConfig.byteLimit
   private val RecordThreshold = bufferConfig.recordLimit
@@ -161,23 +151,13 @@ class KafkaSink(
     }
   }
 
-  /** Send batch to Kafka or SQS based on health status.
+  /** Send batch to Kafka.
     *
     * @param batch List of events to send
     */
   def sinkBatch(batch: List[Events]): Unit =
-    if (batch.nonEmpty) maybeSqs match {
-      // Kafka healthy - send to Kafka
-      case _ if kafkaHealthy =>
-        writeBatchToKafkaWithRetries(batch, minBackoff, maxRetries)
-      // No SQS backup - always try Kafka
-      case None =>
-        writeBatchToKafkaWithRetries(batch, minBackoff, maxRetries)
-      // Kafka not healthy and SQS backup defined - use SQS
-      case Some(sqs) =>
-        log.info(s"Kafka unhealthy, routing ${batch.size} records to SQS backup")
-        writeBatchToSqs(batch, sqs)
-    }
+    if (batch.nonEmpty)
+      writeBatchToKafkaWithRetries(batch, minBackoff, maxRetries)
 
   /** Write batch to Kafka with retry logic.
     *
@@ -195,10 +175,9 @@ class KafkaSink(
           log.info(s"Successfully wrote ${batch.size} records to Kafka topic $topicName")
         } else {
           // Mark Kafka unhealthy immediately on first failure
-          // This causes concurrent batches to route directly to SQS without retrying
           // But this batch will still retry in case it's a transient failure
           markKafkaUnhealthyOnce {
-            log.warn(s"Kafka failure detected, marking as unhealthy. Concurrent batches will route to SQS.")
+            log.warn(s"Kafka failure detected, marking as unhealthy.")
           }
           log.info(
             s"Successfully wrote ${batch.size - failedRecords.size} out of ${batch.size} records to Kafka topic $topicName"
@@ -208,7 +187,7 @@ class KafkaSink(
       case Failure(f) =>
         log.error(s"writeBatchToKafka Future failed with error: ${f.getMessage}", f)
         markKafkaUnhealthyOnce {
-          log.warn(s"Kafka failure detected, marking as unhealthy. Concurrent batches will route to SQS.")
+          log.warn(s"Kafka failure detected, marking as unhealthy.")
         }
         handleKafkaError(batch, nextBackoff, retriesLeft)
     }
@@ -224,16 +203,6 @@ class KafkaSink(
   def handleKafkaError(failedRecords: List[Events], nextBackoff: Long, retriesLeft: Int): Unit = {
     log.debug(s"handleKafkaError called: ${failedRecords.size} failed records, $retriesLeft retries left")
 
-    // If Kafka has been marked unhealthy by another batch and SQS is available,
-    // skip retries and send directly to SQS for fast failover
-    if (!kafkaHealthy && maybeSqs.isDefined && retriesLeft > 0) {
-      log.info(
-        s"Kafka already marked unhealthy by another batch, sending ${failedRecords.size} records directly to SQS (skipping ${retriesLeft} remaining retries)"
-      )
-      maybeSqs.foreach(sqs => writeBatchToSqs(failedRecords, sqs))
-      return
-    }
-
     if (retriesLeft > 0) {
       log.warn(
         s"$retriesLeft retries left. Retrying to write ${failedRecords.size} records to Kafka topic $topicName in $nextBackoff milliseconds"
@@ -247,14 +216,7 @@ class KafkaSink(
         log.info(s"Marking Kafka as unhealthy and starting background health check")
       }
 
-      // Try to send failed records to SQS if available
-      maybeSqs match {
-        case Some(sqs) =>
-          log.info(s"Sending ${failedRecords.size} failed records to SQS backup after Kafka retries exhausted")
-          writeBatchToSqs(failedRecords, sqs)
-        case None =>
-          log.warn(s"Dropping ${failedRecords.size} records after exhausting retries (no SQS backup configured)")
-      }
+      log.warn(s"Dropping ${failedRecords.size} records after exhausting retries")
     }
   }
 
@@ -318,19 +280,6 @@ class KafkaSink(
         result
       }
     }(blockingEc) // Use separate thread pool to avoid blocking main executorService
-
-  /** Write batch to SQS backup.
-    * Converts Events to byte arrays and publishes to SQS.
-    *
-    * @param batch Events to send to SQS
-    * @param sqs SQS publisher
-    */
-  def writeBatchToSqs(batch: List[Events], sqs: SQSPublisher): Unit = {
-    log.info(s"Writing ${batch.size} records to SQS backup (Kafka unhealthy)")
-    batch.foreach { event =>
-      sqs.publish(List(event.payloads), event.key)
-    }
-  }
 
   /** Schedule retry to Kafka after backoff delay.
     *
@@ -445,7 +394,7 @@ class KafkaSink(
     // Signal health check thread to stop
     stopped = true
 
-    // First flush any buffered events so they can be sent to Kafka or SQS as needed
+    // First flush any buffered events so they can be sent to Kafka
     EventStorage.flush()
 
     // Then flush and close Kafka producer
@@ -462,9 +411,6 @@ class KafkaSink(
     // Stop and drain the shared executor to ensure all async sends complete
     executorService.shutdown()
     executorService.awaitTermination(10000, MILLISECONDS)
-
-    // Now safe to stop SQS publisher (it uses the shared executor for scheduling)
-    maybeSqs.foreach(_.stop())
 
     // Finally shut down the blocking executor
     blockingExecutor.shutdown()
@@ -502,7 +448,6 @@ object KafkaSink {
     * @param bufferConfig Buffer configuration
     * @param topicName Kafka topic name
     * @param executorService Executor for async operations
-    * @param maybeSqs Optional SQS publisher for failover
     * @param enableHealthCheck Whether to run background health check
     * @return Initialized KafkaSink
     */
@@ -512,7 +457,6 @@ object KafkaSink {
     bufferConfig: BufferConfig,
     topicName: String,
     executorService: ScheduledExecutorService,
-    maybeSqs: Option[SQSPublisher],
     enableHealthCheck: Boolean = true
   ): KafkaSink = {
     val ks = new KafkaSink(
@@ -521,7 +465,6 @@ object KafkaSink {
       bufferConfig,
       topicName,
       executorService,
-      maybeSqs,
       enableHealthCheck
     )
     // Don't check health at startup - we start healthy

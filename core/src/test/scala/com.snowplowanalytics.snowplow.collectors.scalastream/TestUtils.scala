@@ -47,17 +47,11 @@ object TestUtils {
         good = "good",
         bad = "bad",
         useIpAddressAsPartitionKey = false,
-        sink = Kinesis(
+        sink = Kafka(
           maxBytes = 1000000,
-          region = "us-east-1",
-          threadPoolSize = 12,
-          aws = AWSConfig("cpf", "cpf"),
-          backoffPolicy = KinesisBackoffPolicyConfig(500L, 1500L, 3),
-          customEndpoint = None,
-          sqsGoodBuffer = Some("good-buffer"),
-          sqsBadBuffer = Some("bad-buffer"),
-          sqsMaxBytes = 192000,
-          startupCheckInterval = 1.second
+          brokers = "localhost:9092",
+          retries = 10,
+          producerConf = None
         ),
         buffer = BufferConfig(4000000L, 500L, 60000L)
       ),

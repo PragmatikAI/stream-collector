@@ -27,24 +27,6 @@ collector {
       }
 
       startupCheckInterval = 5 seconds
-
-      sqs {
-        region = "us-east-1"
-        threadPoolSize = 10
-        startupCheckInterval = 5 seconds
-        maxBufferSize = 50000
-        goodQueueUrl = "https://sqs.us-east-1.amazonaws.com/123456789/good-events"
-        badQueueUrl = "https://sqs.us-east-1.amazonaws.com/123456789/bad-events"
-        aws {
-          accessKey = iam
-          secretKey = iam
-        }
-        backoffPolicy {
-          minBackoff = 500
-          maxBackoff = 5000
-          maxRetries = 5
-        }
-      }
     }
 
     buffer {

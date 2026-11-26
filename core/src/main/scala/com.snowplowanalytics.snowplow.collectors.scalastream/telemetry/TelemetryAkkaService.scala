@@ -33,13 +33,7 @@ import com.snowplowanalytics.snowplow.scalatracker.Tracker
 import com.snowplowanalytics.snowplow.scalatracker.idimplicits._
 import com.snowplowanalytics.snowplow.scalatracker.emitters.id.SyncEmitter
 import com.snowplowanalytics.snowplow.scalatracker.Emitter._
-import com.snowplowanalytics.snowplow.collectors.scalastream.model.{
-  CollectorConfig,
-  GooglePubSub,
-  Kinesis,
-  Sqs,
-  TelemetryConfig
-}
+import com.snowplowanalytics.snowplow.collectors.scalastream.model.{CollectorConfig, TelemetryConfig}
 
 /** Pekko implementation of telemetry service.
   *
@@ -114,21 +108,12 @@ object TelemetryPekkoService {
     collectorConfig: CollectorConfig,
     appName: String,
     appVersion: String
-  ): TelemetryPekkoService = {
-
-    val (cloud, region) = collectorConfig.streams.sink match {
-      case k: Kinesis      => (Some(CloudVendor.Aws), Some(k.region))
-      case s: Sqs          => (Some(CloudVendor.Aws), Some(s.region))
-      case _: GooglePubSub => (Some(CloudVendor.Gcp), None)
-      case _               => (None, None)
-    }
-
+  ): TelemetryPekkoService =
     TelemetryPekkoService(
       collectorConfig.telemetry.getOrElse(TelemetryConfig()),
-      cloud,
-      region,
+      None,
+      None,
       appName,
       appVersion
     )
-  }
 }

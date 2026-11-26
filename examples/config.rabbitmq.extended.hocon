@@ -214,12 +214,12 @@ collector {
     }
   }
 
-  # Telemetry sends heartbeat events to external pipeline.
-  # Unless disable parameter set to true, this feature will be enabled. Deleting whole section will not disable it.
+  # Telemetry sends heartbeat events to an external pipeline.
+  # Disabled by default in this fork; set disable = false to opt in.
   # Schema URI: iglu:com.snowplowanalytics.oss/oss_context/jsonschema/1-0-1
   #
   telemetry {
-      disable = false
+      disable = true
       interval = 60 minutes
 
       # Connection properties for the receiving pipeline

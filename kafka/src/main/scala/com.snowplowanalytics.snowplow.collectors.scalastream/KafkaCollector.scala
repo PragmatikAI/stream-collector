@@ -16,7 +16,6 @@ package com.snowplowanalytics.snowplow.collectors.scalastream
 
 import com.snowplowanalytics.snowplow.collectors.scalastream.model._
 import com.snowplowanalytics.snowplow.collectors.scalastream.sinks.KafkaSink
-import com.snowplowanalytics.snowplow.collectors.scalastream.sinks.sqs.SQSPublisher
 import com.snowplowanalytics.snowplow.collectors.scalastream.telemetry.TelemetryPekkoService
 import com.snowplowanalytics.snowplow.collectors.scalastream.generated.BuildInfo
 
@@ -58,20 +57,6 @@ object KafkaCollector extends Collector {
             }
           )
 
-          // Create SQS publishers if configured
-          val (maybeSqsGood, maybeSqsBad) = kc.sqs match {
-            case Some(sqsConf) =>
-              log.info("Kafka SQS mode: BACKUP - Events will be written to SQS only when Kafka fails")
-              val sqsGood = new SQSPublisher(sqsConf, bufferConf, sqsConf.goodQueueUrl, "good", executorGood)
-              val sqsBad  = new SQSPublisher(sqsConf, bufferConf, sqsConf.badQueueUrl, "bad", executorBad)
-              sqsGood.start()
-              sqsBad.start()
-              (Some(sqsGood), Some(sqsBad))
-            case None =>
-              log.info("Kafka SQS integration disabled; publishing to Kafka only")
-              (None, None)
-          }
-
           // Only enable health check on good sink (both use same Kafka cluster)
           val good = KafkaSink.createAndInitialize(
             kc.maxBytes,
@@ -79,7 +64,6 @@ object KafkaCollector extends Collector {
             bufferConf,
             goodStream,
             executorGood,
-            maybeSqsGood,
             enableHealthCheck = true
           )
           val bad = KafkaSink.createAndInitialize(
@@ -88,7 +72,6 @@ object KafkaCollector extends Collector {
             bufferConf,
             badStream,
             executorBad,
-            maybeSqsBad,
             enableHealthCheck = false
           )
 

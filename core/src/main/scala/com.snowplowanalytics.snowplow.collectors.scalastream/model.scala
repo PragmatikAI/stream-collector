@@ -90,62 +90,16 @@ package model {
   final case class CrossDomainConfig(enabled: Boolean, domains: List[String], secure: Boolean)
   final case class CORSConfig(accessControlMaxAge: FiniteDuration)
   final case class KinesisBackoffPolicyConfig(minBackoff: Long, maxBackoff: Long, maxRetries: Int)
-  final case class SqsBackoffPolicyConfig(minBackoff: Long, maxBackoff: Long, maxRetries: Int)
-  final case class GooglePubSubBackoffPolicyConfig(
-    minBackoff: Long,
-    maxBackoff: Long,
-    totalBackoff: Long,
-    multiplier: Double,
-    initialRpcTimeout: Long,
-    maxRpcTimeout: Long,
-    rpcTimeoutMultiplier: Double
-  )
   final case class RabbitMQBackoffPolicyConfig(minBackoff: Long, maxBackoff: Long, multiplier: Double)
   sealed trait SinkConfig {
     val maxBytes: Int
   }
-  final case class AWSConfig(accessKey: String, secretKey: String)
-  final case class Kinesis(
-    maxBytes: Int,
-    region: String,
-    threadPoolSize: Int,
-    aws: AWSConfig,
-    backoffPolicy: KinesisBackoffPolicyConfig,
-    customEndpoint: Option[String],
-    sqsGoodBuffer: Option[String],
-    sqsBadBuffer: Option[String],
-    sqsMaxBytes: Int,
-    startupCheckInterval: FiniteDuration
-  ) extends SinkConfig {
-    val endpoint = customEndpoint.getOrElse(region match {
-      case cn @ "cn-north-1"     => s"https://kinesis.$cn.amazonaws.com.cn"
-      case cn @ "cn-northwest-1" => s"https://kinesis.$cn.amazonaws.com.cn"
-      case _                     => s"https://kinesis.$region.amazonaws.com"
-    })
-  }
-  final case class Sqs(
-    maxBytes: Int,
-    region: String,
-    threadPoolSize: Int,
-    aws: AWSConfig,
-    backoffPolicy: SqsBackoffPolicyConfig,
-    startupCheckInterval: FiniteDuration
-  ) extends SinkConfig
-  final case class GooglePubSub(
-    maxBytes: Int,
-    googleProjectId: String,
-    backoffPolicy: GooglePubSubBackoffPolicyConfig,
-    startupCheckInterval: FiniteDuration,
-    retryInterval: FiniteDuration,
-    gcpUserAgent: GcpUserAgent
-  ) extends SinkConfig
   final case class Kafka(
     maxBytes: Int,
     brokers: String,
     retries: Int,
     producerConf: Option[Map[String, String]],
     threadPoolSize: Int = 10,
-    sqs: Option[Kafka.SQS] = None,
     kafkaTimeouts: Option[KafkaTimeouts] = None,
     backoffPolicy: KinesisBackoffPolicyConfig = KinesisBackoffPolicyConfig(500, 5000, 10),
     startupCheckInterval: FiniteDuration = 5.seconds
@@ -157,7 +111,6 @@ package model {
     deliveryTimeoutMs: Int = 10000,
     metadataMaxAgeMs: Int = 5000
   )
-  final case class Nsq(maxBytes: Int, host: String, port: Int) extends SinkConfig
   final case class Stdout(maxBytes: Int) extends SinkConfig
   final case class Rabbitmq(
     maxBytes: Int,
@@ -179,7 +132,6 @@ package model {
     sink: SinkConfig,
     buffer: BufferConfig
   )
-  final case class GcpUserAgent(productName: String)
 
   final case class StatsdConfig(
     enabled: Boolean,
@@ -194,7 +146,7 @@ package model {
 
   final case class TelemetryConfig(
     // General params
-    disable: Boolean = false,
+    disable: Boolean = true,
     interval: FiniteDuration = 60.minutes,
     // http params
     method: String = "POST",
@@ -282,19 +234,6 @@ package model {
 
     implicit def collectorConfigReader: ConfigReader[CollectorConfig] =
       deriveReader[CollectorConfig]
-  }
-
-  object Kafka {
-    final case class SQS(
-      region: String,
-      threadPoolSize: Int,
-      aws: AWSConfig,
-      backoffPolicy: SqsBackoffPolicyConfig,
-      startupCheckInterval: FiniteDuration,
-      goodQueueUrl: String,
-      badQueueUrl: String,
-      maxBufferSize: Int
-    )
   }
 
 }
