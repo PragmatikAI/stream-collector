@@ -224,7 +224,7 @@ collector {
 
       # Connection properties for the receiving pipeline
       method = POST
-      url = sp.snowcatcloud.com
+      url = ""  # set to your own telemetry endpoint if you enable telemetry
       port = 443
       secure = true
    }

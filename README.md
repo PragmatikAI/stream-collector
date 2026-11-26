@@ -17,12 +17,10 @@ This fork is deliberately opinionated:
 To pull in upstream security updates: `git fetch opensnowcat && git merge opensnowcat/main`,
 then re-resolve the strip-down (conflicts in removed modules are always resolved by deletion).
 
-## Project Resources
- - [OpenSnowcat Project Website](https://opensnowcat.io/)
-
 ## Security
 
-If you discover a potential security issue in this project we ask that you notify OpenSnowcat Security directly via email to security@opensnowcat.io. Please do not create a public GitHub issue.
+See [SECURITY.md](SECURITY.md). Please do not create a public GitHub issue for
+potential security problems.
 
 
 ## License

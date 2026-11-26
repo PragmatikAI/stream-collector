@@ -150,7 +150,7 @@ package model {
     interval: FiniteDuration = 60.minutes,
     // http params
     method: String = "POST",
-    url: String = "sp.snowcatcloud.com",
+    url: String = "", // no default endpoint; must be set explicitly if telemetry is enabled
     port: Int = 443,
     secure: Boolean = true,
     // Params injected by deployment scripts
