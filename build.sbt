@@ -71,11 +71,18 @@ lazy val dynVerSettings = Seq(
   ThisBuild / dynverSeparator := "-" // to be compatible with docker
 )
 
+lazy val dockerSettings = Seq(
+  // Override sbt-snowplow-release's default (eclipse-temurin:11-jre-focal):
+  // Ubuntu 20.04 (focal) left standard support in April 2025
+  dockerBaseImage := "eclipse-temurin:21-jre-noble"
+)
+
 lazy val allSettings = buildSettings ++
   BuildSettings.sbtAssemblySettings ++
   BuildSettings.formatting ++
   Seq(excludeDependencies ++= commonExclusions) ++
   dynVerSettings ++
+  dockerSettings ++
   BuildSettings.addExampleConfToTestCp
 
 lazy val root = project
