@@ -31,7 +31,7 @@ object BuildSettings {
   }
 
   lazy val sbtAssemblySettings = Seq(
-    assembly / assemblyJarName := { s"${moduleName.value}-${version.value}.jar" },
+    assembly / assemblyJarName := s"${moduleName.value}-${version.value}.jar",
     assembly / assemblyMergeStrategy := {
       // merge strategy for fixing netty conflict
       case PathList("io", "netty", xs @ _*)                     => MergeStrategy.first
@@ -40,6 +40,8 @@ object BuildSettings {
       case x if x.endsWith("module-info.class")                 => MergeStrategy.first
       case x if x.endsWith("paginators-1.json")                 => MergeStrategy.first
       case x if x.endsWith("service-2.json")                    => MergeStrategy.first
+      case x if x.contains("FastDoubleParser")                  => MergeStrategy.first
+      case x if x.endsWith("mozilla/public-suffix-list.txt")    => MergeStrategy.first
       case x =>
         val oldStrategy = (assembly / assemblyMergeStrategy).value
         oldStrategy(x)

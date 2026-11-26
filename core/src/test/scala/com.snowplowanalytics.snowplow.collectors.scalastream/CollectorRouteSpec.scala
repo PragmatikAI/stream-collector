@@ -16,51 +16,173 @@ package com.snowplowanalytics.snowplow.collectors.scalastream
 
 import java.net.InetAddress
 
-import akka.http.scaladsl.model._
-import akka.http.scaladsl.model.headers._
-import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.testkit.Specs2RouteTest
+import org.apache.pekko.http.scaladsl.model._
+import org.apache.pekko.http.scaladsl.model.headers._
+import com.snowplowanalytics.snowplow.collectors.scalastream.fixtures.{AmplitudeFixture, AnalyticsJsFixture}
+import org.apache.pekko.http.scaladsl.server.Directives._
+import org.apache.pekko.http.scaladsl.testkit.Specs2RouteTest
 
 import com.snowplowanalytics.snowplow.collectors.scalastream.model.DntCookieMatcher
 
 import org.specs2.mutable.Specification
 
 class CollectorRouteSpec extends Specification with Specs2RouteTest {
-  val mkRoute = (withRedirects: Boolean, spAnonymous: Option[String]) =>
-    new CollectorRoute {
-      override val collectorService = new Service {
-        def preflightResponse(req: HttpRequest): HttpResponse =
-          HttpResponse(200, entity = "preflight response")
-        def flashCrossDomainPolicy: HttpResponse = HttpResponse(200, entity = "flash cross domain")
-        def rootResponse: HttpResponse           = HttpResponse(200, entity = "200 collector root")
-        def cookie(
-          queryString: Option[String],
-          body: Option[String],
-          path: String,
-          cookie: Option[HttpCookie],
-          userAgent: Option[String],
-          refererUri: Option[String],
-          hostname: String,
-          ip: RemoteAddress,
-          request: HttpRequest,
-          pixelExpected: Boolean,
-          doNotTrack: Boolean,
-          contentType: Option[ContentType] = None,
-          spAnonymous: Option[String]      = spAnonymous
-        ): HttpResponse                                            = HttpResponse(200, entity = s"cookie")
-        def cookieName: Option[String]                             = Some("name")
-        def doNotTrackCookie: Option[DntCookieMatcher]             = None
-        def determinePath(vendor: String, version: String): String = "/p1/p2"
-        def enableDefaultRedirect: Boolean                         = withRedirects
-        def sinksHealthy: Boolean                                  = true
+  val mkRoute =
+    (withRedirects: Boolean, spAnonymous: Option[String], analyticsJsBridge: Boolean, amplitudeBridge: Boolean) =>
+      new CollectorRoute {
+        override val collectorService = new Service {
+          def preflightResponse(req: HttpRequest): HttpResponse =
+            HttpResponse(200, entity = "preflight response")
+          def flashCrossDomainPolicy: HttpResponse = HttpResponse(200, entity = "flash cross domain")
+          def rootResponse: HttpResponse           = HttpResponse(200, entity = "200 collector root")
+          def cookie(
+            queryString: Option[String],
+            body: Option[String],
+            path: String,
+            cookie: Option[HttpCookie],
+            userAgent: Option[String],
+            refererUri: Option[String],
+            hostname: String,
+            ip: RemoteAddress,
+            request: HttpRequest,
+            pixelExpected: Boolean,
+            doNotTrack: Boolean,
+            contentType: Option[ContentType] = None,
+            spAnonymous: Option[String] = spAnonymous,
+            analyticsJsEvent: Option[AnalyticsJsBridge.Event] = None,
+            amplitudeEvent: Option[AmplitudeBridge.AmplitudeEvent] = None
+          ): HttpResponse =
+            if (analyticsJsEvent.isDefined) {
+              HttpResponse(200, entity = AnalyticsJsBridge.jsonResponse.noSpaces)
+            } else if (amplitudeEvent.isDefined) {
+              HttpResponse(200, entity = AmplitudeBridge.jsonResponse.noSpaces)
+            } else {
+              HttpResponse(200, entity = s"cookie")
+            }
+
+          def cookieName: Option[String]                             = Some("name")
+          def doNotTrackCookie: Option[DntCookieMatcher]             = None
+          def determinePath(vendor: String, version: String): String = "/p1/p2"
+          def enableDefaultRedirect: Boolean                         = withRedirects
+
+          def bridges: Seq[Bridge] = {
+            val b = List.newBuilder[Bridge]
+            if (analyticsJsBridge) b += AnalyticsJsBridge
+            if (amplitudeBridge) b += AmplitudeBridge
+            b.result()
+          }
+          def sinksHealthy: Boolean = true
+          def crossDomainConfig: model.CrossDomainConfig =
+            model.CrossDomainConfig(enabled = false, domains = List("*"), secure = false)
+        }
+        override val healthService = new HealthService {
+          def isHealthy: Boolean = true
+        }
       }
-      override val healthService = new HealthService {
-        def isHealthy: Boolean = true
+  val route                      = mkRoute(true, None, false, false)
+  val routeWithoutRedirects      = mkRoute(false, None, false, false)
+  val routeWithAnonymousTracking = mkRoute(true, Some("*"), false, false)
+  val routeWithAnalyticsJs       = mkRoute(true, None, true, false)
+  val routeWithAmplitude         = mkRoute(true, None, false, true)
+
+  "The collector <> analytics.js bridge route" should {
+    def assertResponse(response: String) = {
+      val jsonE = io.circe.parser.parse(response)
+      jsonE.isRight shouldEqual true
+      val json     = jsonE.right.get
+      val expected = AnalyticsJsBridge.jsonResponse
+      json shouldEqual expected
+    }
+
+    "accept an identify event" in {
+      val event = AnalyticsJsFixture.identifyPayload.noSpaces
+      Post("/com.segment/v1/i", event) ~> routeWithAnalyticsJs.collectorRoute ~> check {
+        assertResponse(responseAs[String])
       }
     }
-  val route                      = mkRoute(true, None)
-  val routeWithoutRedirects      = mkRoute(false, None)
-  val routeWithAnonymousTracking = mkRoute(true, Some("*"))
+
+    "accept a track event" in {
+      val event = AnalyticsJsFixture.trackPayload.noSpaces
+      Post("/com.segment/v1/t", event) ~> routeWithAnalyticsJs.collectorRoute ~> check {
+        assertResponse(responseAs[String])
+      }
+    }
+
+    "accept a page event" in {
+      val event = AnalyticsJsFixture.pagePayload.noSpaces
+      Post("/com.segment/v1/p", event) ~> routeWithAnalyticsJs.collectorRoute ~> check {
+        assertResponse(responseAs[String])
+      }
+    }
+
+    "accept a screen event" in {
+      val event = AnalyticsJsFixture.screenPayload.noSpaces
+      Post("/com.segment/v1/s", event) ~> routeWithAnalyticsJs.collectorRoute ~> check {
+        assertResponse(responseAs[String])
+      }
+    }
+
+    "accept a group event" in {
+      val event = AnalyticsJsFixture.groupPayload.noSpaces
+      Post("/com.segment/v1/g", event) ~> routeWithAnalyticsJs.collectorRoute ~> check {
+        assertResponse(responseAs[String])
+      }
+    }
+
+    "accept an alias event" in {
+      val event = AnalyticsJsFixture.aliasPayload.noSpaces
+      Post("/com.segment/v1/a", event) ~> routeWithAnalyticsJs.collectorRoute ~> check {
+        assertResponse(responseAs[String])
+      }
+    }
+
+    "reject non analytics.js path" in {
+      val event = AnalyticsJsFixture.aliasPayload.noSpaces
+      Post("/com.segment/v1/x", event) ~> routeWithAnalyticsJs.collectorRoute ~> check {
+        status.isFailure() must beTrue
+      }
+    }
+
+    "reject an unsupported version from analytics.js" in {
+      val event = AnalyticsJsFixture.aliasPayload.noSpaces
+      Post("/com.segment/v2/p", event) ~> routeWithAnalyticsJs.collectorRoute ~> check {
+        status.isFailure() must beTrue
+      }
+    }
+  }
+
+  "The collector <> amplitude bridge route" should {
+    def assertResponse(response: String) = {
+      val jsonE = io.circe.parser.parse(response)
+      jsonE.isRight shouldEqual true
+      val json = jsonE.right.get
+      json.hcursor.get[Int]("code").toOption shouldEqual Some(200)
+      json.hcursor.get[Int]("events_ingested").toOption must beSome
+      json.hcursor.get[Int]("payload_size_bytes").toOption must beSome
+      json.hcursor.get[Long]("server_upload_time").toOption must beSome
+    }
+
+    "accept an httpapi event" in {
+      val event = AmplitudeFixture.httpapiPayload.noSpaces
+      Post("/com.amplitude/2/httpapi", event) ~> routeWithAmplitude.collectorRoute ~> check {
+        assertResponse(responseAs[String])
+      }
+    }
+
+    "accept a batch event" in {
+      val event = AmplitudeFixture.httpapiPayload.noSpaces
+      Post("/com.amplitude/2/batch", event) ~> routeWithAmplitude.collectorRoute ~> check {
+        assertResponse(responseAs[String])
+      }
+    }
+
+    "reject an unsupported version from amplitude" in {
+      val event = AmplitudeFixture.httpapiPayload.noSpaces
+      Post("/com.amplitude/v2/httpapi", event) ~> routeWithAmplitude.collectorRoute ~> check {
+        status.isFailure() must beTrue
+      }
+    }
+  }
 
   "The collector route" should {
     "respond to the cors route with a preflight response" in {
@@ -141,7 +263,9 @@ class CollectorRouteSpec extends Specification with Specs2RouteTest {
         route.queryString(None) shouldEqual None
       }
       "produce the query string when some of the values are URL encoded" in {
-        route.queryString(Some("/abc/def?schema=iglu%3Acom.acme%2Fcampaign%2Fjsonschema%2F1-0-0&aid=test")) shouldEqual Some(
+        route.queryString(
+          Some("/abc/def?schema=iglu%3Acom.acme%2Fcampaign%2Fjsonschema%2F1-0-0&aid=test")
+        ) shouldEqual Some(
           "schema=iglu%3Acom.acme%2Fcampaign%2Fjsonschema%2F1-0-0&aid=test"
         )
       }
@@ -153,16 +277,16 @@ class CollectorRouteSpec extends Specification with Specs2RouteTest {
           route.cookieIfWanted(Some("abc")) { c =>
             complete(HttpResponse(200, entity = c.toString))
           } ~> check {
-          responseAs[String] shouldEqual "Some(abc=123)"
-        }
+            responseAs[String] shouldEqual "Some(abc=123)"
+          }
       }
       "return none if no cookie name is given" in {
         Get() ~> Cookie("abc" -> "123") ~>
           route.cookieIfWanted(None) { c =>
             complete(HttpResponse(200, entity = c.toString))
           } ~> check {
-          responseAs[String] shouldEqual "None"
-        }
+            responseAs[String] shouldEqual "None"
+          }
       }
     }
 
@@ -179,24 +303,24 @@ class CollectorRouteSpec extends Specification with Specs2RouteTest {
           route.doNotTrack(Some(DntCookieMatcher(name = "abc", value = "345"))) { dnt =>
             complete(dnt.toString)
           } ~> check {
-          responseAs[String] shouldEqual "false"
-        }
+            responseAs[String] shouldEqual "false"
+          }
       }
       "return true if there is a properly-valued dnt cookie" in {
         Get() ~> Cookie("abc" -> "123") ~>
           route.doNotTrack(Some(DntCookieMatcher(name = "abc", value = "123"))) { dnt =>
             complete(dnt.toString)
           } ~> check {
-          responseAs[String] shouldEqual "true"
-        }
+            responseAs[String] shouldEqual "true"
+          }
       }
       "return true if there is a properly-valued dnt cookie that matches a regex value" in {
         Get() ~> Cookie("abc" -> s"deleted-${System.currentTimeMillis()}") ~>
           route.doNotTrack(Some(DntCookieMatcher(name = "abc", value = "deleted-[0-9]+"))) { dnt =>
             complete(dnt.toString)
           } ~> check {
-          responseAs[String] shouldEqual "true"
-        }
+            responseAs[String] shouldEqual "true"
+          }
       }
     }
 
@@ -206,15 +330,16 @@ class CollectorRouteSpec extends Specification with Specs2RouteTest {
           Some("*")
         ) { (_, ip, _) =>
           complete(ip.toString)
-        } ~> check { responseAs[String] shouldEqual "unknown" }
+        } ~> check(responseAs[String] shouldEqual "unknown")
       }
       "no SP-Anonymous present should extract the IP address" in {
-        Get().withAttributes(Map(AttributeKeys.remoteAddress -> RemoteAddress.IP(InetAddress.getByName("127.0.0.1")))) ~> route
-          .extractors(
-            None
-          ) { (_, ip, _) =>
-            complete(ip.toString)
-          } ~> check { responseAs[String] shouldEqual "127.0.0.1" }
+        Get().withAttributes(
+          Map(AttributeKeys.remoteAddress -> RemoteAddress.IP(InetAddress.getByName("127.0.0.1")))
+        ) ~> route.extractors(
+          None
+        ) { (_, ip, _) =>
+          complete(ip.toString)
+        } ~> check(responseAs[String] shouldEqual "127.0.0.1")
       }
     }
   }

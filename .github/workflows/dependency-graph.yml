@@ -1,0 +1,30 @@
+# .github/workflows/dependency-graph.yml
+name: Update Dependency Graph
+
+on:
+  push:
+    branches:
+      - main # default branch of the project
+
+jobs:
+  update-graph:
+    name: Update Dependency Graph
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          java-version: 11
+          distribution: 'corretto'
+          cache: sbt
+      - uses: sbt/setup-sbt@v1
+        with:
+          sbt-runner-version: 1.10.11
+      - uses: scalacenter/sbt-dependency-submission@v3
+        with:
+          ## Optional: Define the working directory of your build.
+          ## It should contain the build.sbt file.
+          working-directory: './'

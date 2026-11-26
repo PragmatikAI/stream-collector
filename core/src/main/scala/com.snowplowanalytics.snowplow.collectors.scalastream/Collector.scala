@@ -17,20 +17,20 @@ package com.snowplowanalytics.snowplow.collectors.scalastream
 import java.io.File
 import javax.net.ssl.SSLContext
 import org.slf4j.LoggerFactory
-import akka.actor.ActorSystem
-import akka.http.scaladsl.{ConnectionContext, Http}
-import akka.http.scaladsl.model.StatusCodes
-import akka.http.scaladsl.server.Route
-import akka.http.scaladsl.server.Directives._
+import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.http.scaladsl.{ConnectionContext, Http}
+import org.apache.pekko.http.scaladsl.model.StatusCodes
+import org.apache.pekko.http.scaladsl.server.Route
+import org.apache.pekko.http.scaladsl.server.Directives._
 import com.typesafe.config.{Config, ConfigFactory}
 import pureconfig.ConfigSource
 import com.timgroup.statsd.NonBlockingStatsDClientBuilder
-import fr.davit.akka.http.metrics.core.HttpMetricsRegistry
-import fr.davit.akka.http.metrics.core.HttpMetrics._
-import fr.davit.akka.http.metrics.datadog.{DatadogRegistry, DatadogSettings}
+import fr.davit.pekko.http.metrics.core.HttpMetricsRegistry
+import fr.davit.pekko.http.metrics.core.HttpMetrics._
+import fr.davit.pekko.http.metrics.datadog.{DatadogRegistry, DatadogSettings}
 import com.snowplowanalytics.snowplow.collectors.scalastream.sinks.Sink
 import com.snowplowanalytics.snowplow.collectors.scalastream.model._
-import com.snowplowanalytics.snowplow.collectors.scalastream.telemetry.TelemetryAkkaService
+import com.snowplowanalytics.snowplow.collectors.scalastream.telemetry.TelemetryPekkoService
 
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration.Duration
@@ -88,7 +88,7 @@ trait Collector {
     collectorConf: CollectorConfig,
     akkaConf: Config,
     sinks: CollectorSinks,
-    telemetry: TelemetryAkkaService
+    telemetry: TelemetryPekkoService
   ): Unit = {
 
     implicit val system           = ActorSystem.create("scala-stream-collector", akkaConf)
@@ -177,14 +177,14 @@ trait Collector {
         case Some(r) =>
           val builder = Http().newMeteredServerAt(collectorConf.interface, port, r)
           val stage   = if (secure) builder.enableHttps(ConnectionContext.httpsServer(SSLContext.getDefault)) else builder
-          stage.bind(routes).map(shutdownHook).map(startupHook).recover {
-            case ex => errorHook(ex)
+          stage.bind(routes).map(shutdownHook).map(startupHook).recover { case ex =>
+            errorHook(ex)
           }
         case None =>
           val builder = Http().newServerAt(collectorConf.interface, port)
           val stage   = if (secure) builder.enableHttps(ConnectionContext.httpsServer(SSLContext.getDefault)) else builder
-          stage.bind(routes).map(shutdownHook).map(startupHook).recover {
-            case ex => errorHook(ex)
+          stage.bind(routes).map(shutdownHook).map(startupHook).recover { case ex =>
+            errorHook(ex)
           }
       }
 
@@ -238,8 +238,7 @@ trait Collector {
       log.warn(s"Initiating $label sink shutdown")
       sink.shutdown()
       log.warn(s"Completed $label sink shutdown")
-    }.recover {
-      case NonFatal(t) =>
-        log.error(s"Caught exception shutting down $label sink", t)
+    }.recover { case NonFatal(t) =>
+      log.error(s"Caught exception shutting down $label sink", t)
     }
 }

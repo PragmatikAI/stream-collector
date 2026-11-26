@@ -22,23 +22,25 @@ lazy val commonDependencies = Seq(
   Dependencies.Libraries.slf4j,
   Dependencies.Libraries.log4jOverSlf4j,
   Dependencies.Libraries.config,
+  Dependencies.Libraries.commonsLang3,
+  Dependencies.Libraries.httpclient5,
   // Scala
   Dependencies.Libraries.scopt,
-  Dependencies.Libraries.akkaStream,
-  Dependencies.Libraries.akkaHttp,
-  Dependencies.Libraries.akkaStream,
-  Dependencies.Libraries.akkaSlf4j,
-  Dependencies.Libraries.akkaHttpMetrics,
+  Dependencies.Libraries.pekkoStream,
+  Dependencies.Libraries.pekkoHttp,
+  Dependencies.Libraries.pekkoSlf4j,
+  Dependencies.Libraries.pekkoHttpMetrics,
   Dependencies.Libraries.jnrUnixsocket,
   Dependencies.Libraries.badRows,
   Dependencies.Libraries.collectorPayload,
   Dependencies.Libraries.pureconfig,
   Dependencies.Libraries.trackerCore,
   Dependencies.Libraries.trackerEmitterId,
+  Dependencies.Libraries.circeParser,
   // Unit tests
-  Dependencies.Libraries.akkaTestkit,
-  Dependencies.Libraries.akkaHttpTestkit,
-  Dependencies.Libraries.akkaStreamTestkit,
+  Dependencies.Libraries.pekkoTestkit,
+  Dependencies.Libraries.pekkoHttpTestkit,
+  Dependencies.Libraries.pekkoStreamTestkit,
   Dependencies.Libraries.specs2,
   // Integration tests
   Dependencies.Libraries.testcontainersIt,
@@ -48,14 +50,15 @@ lazy val commonDependencies = Seq(
 
 lazy val commonExclusions = Seq(
   "org.apache.tomcat.embed" % "tomcat-embed-core", // exclude for security vulnerabilities introduced by libthrift
-  // Avoid duplicate .proto files brought in by akka and google-cloud-pubsub.
+  // Avoid duplicate .proto files brought in by akka/pekko and google-cloud-pubsub.
   // We don't need any akka serializers because collector runs in a single JVM.
-  "com.typesafe.akka" % "akka-protobuf-v3_2.12"
+  "com.typesafe.akka" % "akka-protobuf-v3_2.12",
+  "org.apache.pekko" %% "pekko-protobuf-v3"
 )
 
 lazy val buildInfoSettings = Seq(
   buildInfoPackage := "com.snowplowanalytics.snowplow.collectors.scalastream.generated",
-  buildInfoKeys := Seq[BuildInfoKey](organization, moduleName, name, version, "shortName" -> "ssc", scalaVersion)
+  buildInfoKeys := Seq[BuildInfoKey](organization, moduleName, name, version, "shortName" -> "osc", scalaVersion)
 )
 
 // Make package (build) metadata available within source code for integration tests.
@@ -87,16 +90,16 @@ lazy val scalifiedSettings = Seq(
 
 lazy val buildSettings = Seq(
   organization := "com.snowplowanalytics",
-  name := "snowplow-stream-collector",
+  name := "opensnowcat-collector",
   description := "Scala Stream Collector for Snowplow raw events",
-  scalaVersion := "2.12.10",
+  scalaVersion := "2.12.19",
   javacOptions := Seq("-source", "11", "-target", "11"),
   resolvers ++= Dependencies.resolutionRepos
 )
 
 lazy val dynVerSettings = Seq(
   ThisBuild / dynverVTagPrefix := false, // Otherwise git tags required to have v-prefix
-  ThisBuild / dynverSeparator := "-"     // to be compatible with docker
+  ThisBuild / dynverSeparator := "-" // to be compatible with docker
 )
 
 lazy val allSettings = buildSettings ++
@@ -112,7 +115,7 @@ lazy val root = project
   .aggregate(core, kinesis, pubsub, kafka, nsq, stdout, sqs, rabbitmq)
 
 lazy val core = project
-  .settings(moduleName := "snowplow-stream-collector-core")
+  .settings(moduleName := "opensnowcat-collector-core")
   .settings(buildSettings ++ BuildSettings.sbtAssemblySettings)
   .settings(libraryDependencies ++= commonDependencies)
   .settings(excludeDependencies ++= commonExclusions)
@@ -121,12 +124,13 @@ lazy val core = project
 
 lazy val kinesisSettings =
   allSettings ++ buildInfoSettings ++ Defaults.itSettings ++ scalifiedSettings ++ Seq(
-    moduleName := "snowplow-stream-collector-kinesis",
+    moduleName := "opensnowcat-collector-kinesis",
     Docker / packageName := "scala-stream-collector-kinesis",
     libraryDependencies ++= Seq(
       Dependencies.Libraries.kinesis,
       Dependencies.Libraries.sts,
       Dependencies.Libraries.sqs,
+      Dependencies.Libraries.nettyAll,
       // integration tests dependencies
       Dependencies.Libraries.specs2It,
       Dependencies.Libraries.specs2CEIt
@@ -151,11 +155,12 @@ lazy val kinesisDistroless = project
 
 lazy val sqsSettings =
   allSettings ++ buildInfoSettings ++ Seq(
-    moduleName := "snowplow-stream-collector-sqs",
+    moduleName := "opensnowcat-collector-sqs",
     Docker / packageName := "scala-stream-collector-sqs",
     libraryDependencies ++= Seq(
       Dependencies.Libraries.sqs,
       Dependencies.Libraries.sts,
+      Dependencies.Libraries.nettyAll
     )
   )
 
@@ -173,14 +178,17 @@ lazy val sqsDistroless = project
 
 lazy val pubsubSettings =
   allSettings ++ buildInfoSettings ++ Defaults.itSettings ++ scalifiedSettings ++ Seq(
-    moduleName := "snowplow-stream-collector-google-pubsub",
+    moduleName := "opensnowcat-collector-google-pubsub",
     Docker / packageName := "scala-stream-collector-pubsub",
     libraryDependencies ++= Seq(
       Dependencies.Libraries.pubsub,
       Dependencies.Libraries.protobuf,
+      Dependencies.Libraries.guava,
+      Dependencies.Libraries.grpcNettyShaded,
+      
       // integration tests dependencies
       Dependencies.Libraries.specs2It,
-      Dependencies.Libraries.specs2CEIt,
+      Dependencies.Libraries.specs2CEIt
     ),
     IntegrationTest / test := (IntegrationTest / test).dependsOn(Docker / publishLocal).value,
     IntegrationTest / testOnly := (IntegrationTest / testOnly).dependsOn(Docker / publishLocal).evaluated
@@ -202,9 +210,17 @@ lazy val pubsubDistroless = project
 
 lazy val kafkaSettings =
   allSettings ++ buildInfoSettings ++ Seq(
-    moduleName := "snowplow-stream-collector-kafka",
+    moduleName := "opensnowcat-collector-kafka",
     Docker / packageName := "scala-stream-collector-kafka",
-    libraryDependencies ++= Seq(Dependencies.Libraries.kafkaClients, Dependencies.Libraries.mskAuth)
+    libraryDependencies ++= Seq(
+      Dependencies.Libraries.kafkaClients,
+      Dependencies.Libraries.lz4Java,
+      Dependencies.Libraries.mskAuth,
+      Dependencies.Libraries.nettyAll,
+      Dependencies.Libraries.jacksonCore,
+      Dependencies.Libraries.sqs,
+      Dependencies.Libraries.sts
+    )
   )
 
 lazy val kafka = project
@@ -221,12 +237,14 @@ lazy val kafkaDistroless = project
 
 lazy val nsqSettings =
   allSettings ++ buildInfoSettings ++ Seq(
-    moduleName := "snowplow-stream-collector-nsq",
+    moduleName := "opensnowcat-collector-nsq",
     Docker / packageName := "scala-stream-collector-nsq",
     libraryDependencies ++= Seq(
       Dependencies.Libraries.nsqClient,
       Dependencies.Libraries.jackson,
-      Dependencies.Libraries.log4j
+      Dependencies.Libraries.log4j,
+      Dependencies.Libraries.guava,
+      Dependencies.Libraries.nettyAll
     )
   )
 
@@ -244,7 +262,7 @@ lazy val nsqDistroless = project
 
 lazy val stdoutSettings =
   allSettings ++ buildInfoSettings ++ Seq(
-    moduleName := "snowplow-stream-collector-stdout",
+    moduleName := "opensnowcat-collector-stdout",
     Docker / packageName := "scala-stream-collector-stdout"
   )
 
@@ -262,7 +280,7 @@ lazy val stdoutDistroless = project
 
 lazy val rabbitmqSettings =
   allSettings ++ buildInfoSettings ++ Seq(
-    moduleName := "snowplow-stream-collector-rabbitmq",
+    moduleName := "opensnowcat-collector-rabbitmq",
     Docker / packageName := "scala-stream-collector-rabbitmq-experimental",
     libraryDependencies ++= Seq(Dependencies.Libraries.rabbitMQ)
   )

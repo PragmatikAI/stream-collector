@@ -14,10 +14,10 @@
  */
 package com.snowplowanalytics.snowplow.collectors.scalastream
 
-import akka.http.scaladsl.model._
-import akka.http.scaladsl.model.headers.HttpCookiePair
-import akka.http.scaladsl.server.{Directive1, Route}
-import akka.http.scaladsl.server.Directives._
+import org.apache.pekko.http.scaladsl.model._
+import org.apache.pekko.http.scaladsl.model.headers.HttpCookiePair
+import org.apache.pekko.http.scaladsl.server.{Directive1, Route}
+import org.apache.pekko.http.scaladsl.server.Directives._
 
 import com.snowplowanalytics.snowplow.collectors.scalastream.model.DntCookieMatcher
 
@@ -48,6 +48,12 @@ trait CollectorRoute {
       complete(StatusCodes.NotFound -> "redirects disabled")
     }
 
+  /** Bridge dispatch map, built once from the configured bridges.
+    * Keyed by (vendor, version) path segments.
+    */
+  private lazy val bridgeMap: Map[(String, String), Bridge] =
+    collectorService.bridges.map(b => (b.vendor, b.version) -> b).toMap
+
   def routes: Route =
     doNotTrack(collectorService.doNotTrackCookie) { dnt =>
       cookieIfWanted(collectorService.cookieName) { reqCookie =>
@@ -55,8 +61,33 @@ trait CollectorRoute {
         headers { (userAgent, refererURI, rawRequestURI, spAnonymous) =>
           val qs = queryString(rawRequestURI)
           extractors(spAnonymous) { (host, ip, request) =>
+            val ctx = BridgeContext(
+              qs,
+              cookie,
+              userAgent,
+              refererURI,
+              host,
+              ip,
+              dnt,
+              request,
+              spAnonymous,
+              extractContentType,
+              collectorService
+            )
+
+            val bridgeRoutes = if (bridgeMap.nonEmpty) {
+              pathPrefix(Segment / Segment) { (vendor, version) =>
+                bridgeMap.get((vendor, version)) match {
+                  case Some(bridge) => bridge.route(ctx)
+                  case None         => reject
+                }
+              }
+            } else {
+              reject
+            }
+
             // get the adapter vendor and version from the path
-            path(Segment / Segment) { (vendor, version) =>
+            val collectorRoutes = path(Segment / Segment) { (vendor, version) =>
               val path = collectorService.determinePath(vendor, version)
               post {
                 extractContentType { ct =>
@@ -72,7 +103,7 @@ trait CollectorRoute {
                       ip,
                       request,
                       pixelExpected = false,
-                      doNotTrack    = dnt,
+                      doNotTrack = dnt,
                       Some(ct),
                       spAnonymous
                     )
@@ -92,7 +123,7 @@ trait CollectorRoute {
                     ip,
                     request,
                     pixelExpected = true,
-                    doNotTrack    = dnt,
+                    doNotTrack = dnt,
                     None,
                     spAnonymous
                   )
@@ -112,13 +143,15 @@ trait CollectorRoute {
                     ip,
                     request,
                     pixelExpected = true,
-                    doNotTrack    = dnt,
+                    doNotTrack = dnt,
                     None,
                     spAnonymous
                   )
                   complete(r)
                 }
               }
+
+            collectorRoutes ~ bridgeRoutes
           }
         }
       }
@@ -126,8 +159,7 @@ trait CollectorRoute {
       complete(HttpResponse(404, entity = "404 not found"))
     }
 
-  /**
-    * Extract the query string from a request URI
+  /** Extract the query string from a request URI
     * @param rawRequestURI URI optionally extracted from the Raw-Request-URI header
     * @return the extracted query string or an empty string
     */
@@ -139,8 +171,7 @@ trait CollectorRoute {
     }
   }
 
-  /**
-    * Directive to extract a cookie if a cookie name is specified and if such a cookie exists
+  /** Directive to extract a cookie if a cookie name is specified and if such a cookie exists
     * @param name Optionally configured cookie name
     */
   def cookieIfWanted(name: Option[String]): Directive1[Option[HttpCookiePair]] = name match {
@@ -148,8 +179,7 @@ trait CollectorRoute {
     case None    => optionalHeaderValue(_ => None)
   }
 
-  /**
-    * Directive to filter requests which contain a do not track cookie
+  /** Directive to filter requests which contain a do not track cookie
     * @param cookieMatcher the configured do not track cookie to check against
     */
   def doNotTrack(cookieMatcher: Option[DntCookieMatcher]): Directive1[Boolean] =

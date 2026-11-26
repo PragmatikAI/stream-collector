@@ -18,14 +18,13 @@ import java.net.{MalformedURLException, URL}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.time.Instant
 import java.util.UUID
-import org.apache.commons.codec.binary.Base64
 import org.slf4j.LoggerFactory
 
 import scala.collection.JavaConverters._
 
-import akka.http.scaladsl.model._
-import akka.http.scaladsl.model.headers._
-import akka.http.scaladsl.model.headers.CacheDirectives._
+import org.apache.pekko.http.scaladsl.model._
+import org.apache.pekko.http.scaladsl.model.headers._
+import org.apache.pekko.http.scaladsl.model.headers.CacheDirectives._
 import cats.data.NonEmptyList
 import cats.implicits._
 
@@ -34,8 +33,7 @@ import com.snowplowanalytics.snowplow.CollectorPayload.thrift.model1.CollectorPa
 import com.snowplowanalytics.snowplow.collectors.scalastream.model._
 import com.snowplowanalytics.snowplow.collectors.scalastream.utils.SplitBatch
 
-/**
-  * Service responding to HTTP requests, mainly setting a cookie identifying the user and storing
+/** Service responding to HTTP requests, mainly setting a cookie identifying the user and storing
   * events
   */
 trait Service {
@@ -55,18 +53,22 @@ trait Service {
     pixelExpected: Boolean,
     doNotTrack: Boolean,
     contentType: Option[ContentType] = None,
-    spAnonymous: Option[String]      = None
+    spAnonymous: Option[String] = None,
+    analyticsJsEvent: Option[AnalyticsJsBridge.Event] = None,
+    amplitudeEvent: Option[AmplitudeBridge.AmplitudeEvent] = None
   ): HttpResponse
   def cookieName: Option[String]
   def doNotTrackCookie: Option[DntCookieMatcher]
   def determinePath(vendor: String, version: String): String
   def enableDefaultRedirect: Boolean
+  def bridges: Seq[Bridge]
   def sinksHealthy: Boolean
+  def crossDomainConfig: CrossDomainConfig
 }
 
 object CollectorService {
   // Contains an invisible pixel to return for `/i` requests.
-  val pixel = Base64.decodeBase64("R0lGODlhAQABAPAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==")
+  val pixel = java.util.Base64.getDecoder.decode("R0lGODlhAQABAPAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==")
 }
 
 class CollectorService(
@@ -85,12 +87,18 @@ class CollectorService(
   override val cookieName            = config.cookieName
   override val doNotTrackCookie      = config.doNotTrackHttpCookie
   override val enableDefaultRedirect = config.enableDefaultRedirect
-  override def sinksHealthy          = sinks.good.isHealthy && sinks.bad.isHealthy
+  override val bridges: Seq[Bridge] = {
+    val b = List.newBuilder[Bridge]
+    if (config.experimental.enableAnalyticsJsBridge) b += AnalyticsJsBridge
+    if (config.experimental.enableAmplitudeBridge) b += AmplitudeBridge
+    b.result()
+  }
+  override val crossDomainConfig = config.crossDomain
+  override def sinksHealthy      = sinks.good.isHealthy && sinks.bad.isHealthy
 
   private val spAnonymousNuid = "00000000-0000-0000-0000-000000000000"
 
-  /**
-    * Determines the path to be used in the response,
+  /** Determines the path to be used in the response,
     * based on whether a mapping can be found in the config for the original request path.
     */
   override def determinePath(vendor: String, version: String): String = {
@@ -111,7 +119,9 @@ class CollectorService(
     pixelExpected: Boolean,
     doNotTrack: Boolean,
     contentType: Option[ContentType] = None,
-    spAnonymous: Option[String]
+    spAnonymous: Option[String],
+    analyticsJsEvent: Option[AnalyticsJsBridge.Event] = None,
+    amplitudeEvent: Option[AmplitudeBridge.AmplitudeEvent] = None
   ): HttpResponse = {
     val (ipAddress, partitionKey) = ipAndPartitionKey(ip, config.streams.useIpAddressAsPartitionKey)
 
@@ -142,7 +152,9 @@ class CollectorService(
             request,
             nuid,
             ct,
-            spAnonymous
+            spAnonymous,
+            analyticsJsEvent,
+            amplitudeEvent
           )
         // we don't store events in case we're bouncing
         if (!bounce && !doNotTrack) sinkEvent(event, partitionKey)
@@ -156,7 +168,17 @@ class CollectorService(
             `Access-Control-Allow-Credentials`(true)
           )
 
-        buildHttpResponse(event, params, headers.toList, redirect, pixelExpected, bounce, config.redirectMacro)
+        buildHttpResponse(
+          event,
+          params,
+          headers.toList,
+          redirect = redirect,
+          pixelExpected = pixelExpected,
+          bounce = bounce,
+          config.redirectMacro,
+          analyticsJsEvent,
+          amplitudeEvent
+        )
 
       case Left(error) =>
         val badRow = BadRow.GenericError(
@@ -173,10 +195,9 @@ class CollectorService(
   }
 
   def extractQueryParams(qs: Option[String]): Either[IllegalUriException, Map[String, String]] =
-    Either.catchOnly[IllegalUriException] { Uri.Query(qs).toMap }
+    Either.catchOnly[IllegalUriException](Uri.Query(qs).toMap)
 
-  /**
-    * Creates a response to the CORS preflight Options request
+  /** Creates a response to the CORS preflight Options request
     * @param request Incoming preflight Options request
     * @return Response granting permissions to make the actual request
     */
@@ -199,15 +220,16 @@ class CollectorService(
   /** Creates a response with a cross domain policiy file */
   def flashCrossDomainPolicy(config: CrossDomainConfig): HttpResponse =
     if (config.enabled) {
-      HttpResponse(entity = HttpEntity(
-        contentType = ContentType(MediaTypes.`text/xml`, HttpCharsets.`ISO-8859-1`),
-        string = """<?xml version="1.0"?>""" + "\n<cross-domain-policy>\n" +
-          config
-            .domains
-            .map(d => s"""  <allow-access-from domain=\"$d\" secure=\"${config.secure}\" />""")
-            .mkString("\n") +
-          "\n</cross-domain-policy>"
-      )
+      HttpResponse(entity =
+        HttpEntity(
+          contentType = ContentType(MediaTypes.`text/xml`, HttpCharsets.`ISO-8859-1`),
+          string = """<?xml version="1.0"?>""" + "\n<cross-domain-policy>\n" +
+            config
+              .domains
+              .map(d => s"""  <allow-access-from domain=\"$d\" secure=\"${config.secure}\" />""")
+              .mkString("\n") +
+            "\n</cross-domain-policy>"
+        )
       )
     } else {
       HttpResponse(404, entity = "404 not found")
@@ -236,8 +258,32 @@ class CollectorService(
     request: HttpRequest,
     networkUserId: String,
     contentType: Option[String],
-    spAnonymous: Option[String]
+    spAnonymous: Option[String],
+    analyticsJsEvent: Option[AnalyticsJsBridge.Event] = None,
+    amplitudeEvent: Option[AmplitudeBridge.AmplitudeEvent] = None
   ): CollectorPayload = {
+    val customBody = (analyticsJsEvent, amplitudeEvent) match {
+      case (Some(eventType), _) =>
+        val jsonBody = io
+          .circe
+          .parser
+          .parse(body.getOrElse("{}"))
+          .getOrElse(throw new RuntimeException("The request body must be a JSON-encoded Analytic.js payload"))
+        val payload = AnalyticsJsBridge.createSnowplowPayload(jsonBody, eventType, networkUserId)
+        Some(payload.noSpaces)
+
+      case (_, Some(event)) =>
+        val jsonBody = io
+          .circe
+          .parser
+          .parse(body.getOrElse("{}"))
+          .getOrElse(throw new RuntimeException("The request body must be a JSON-encoded Amplitude payload"))
+        val payload = AmplitudeBridge.createSnowplowPayload(jsonBody, event, networkUserId)
+        Some(payload.noSpaces)
+
+      case _ => body
+    }
+
     val e = new CollectorPayload(
       "iglu:com.snowplowanalytics.snowplow/CollectorPayload/thrift/1-0-0",
       ipAddress,
@@ -246,13 +292,13 @@ class CollectorService(
       collector
     )
     e.querystring = queryString.orNull
-    body.foreach(e.body = _)
+    customBody.foreach(e.body = _)
     e.path = path
-    userAgent.foreach(e.userAgent   = _)
+    userAgent.foreach(e.userAgent = _)
     refererUri.foreach(e.refererUri = _)
-    e.hostname      = hostname
+    e.hostname = hostname
     e.networkUserId = networkUserId
-    e.headers       = (headers(request, spAnonymous) ++ contentType).asJava
+    e.headers = (headers(request, spAnonymous) ++ contentType).asJava
     contentType.foreach(e.contentType = _)
     e
   }
@@ -275,7 +321,7 @@ class CollectorService(
     sinks.bad.storeRawEvents(toSink, partitionKey)
   }
 
-  /** Builds the final http response from  */
+  /** Builds the final http response from */
   def buildHttpResponse(
     event: CollectorPayload,
     queryParams: Map[String, String],
@@ -283,25 +329,44 @@ class CollectorService(
     redirect: Boolean,
     pixelExpected: Boolean,
     bounce: Boolean,
-    redirectMacroConfig: RedirectMacroConfig
+    redirectMacroConfig: RedirectMacroConfig,
+    analyticsJsEvent: Option[AnalyticsJsBridge.Event] = None,
+    amplitudeEvent: Option[AmplitudeBridge.AmplitudeEvent] = None
   ): HttpResponse =
     if (redirect) {
       val r = buildRedirectHttpResponse(event, queryParams, redirectMacroConfig)
       r.withHeaders(r.headers ++ headers)
     } else {
-      buildUsualHttpResponse(pixelExpected, bounce).withHeaders(headers)
+      buildUsualHttpResponse(
+        pixelExpected = pixelExpected,
+        bounce = bounce,
+        analyticsJsEvent = analyticsJsEvent,
+        amplitudeEvent = amplitudeEvent
+      ).withHeaders(headers)
     }
 
   /** Builds the appropriate http response when not dealing with click redirects. */
-  def buildUsualHttpResponse(pixelExpected: Boolean, bounce: Boolean): HttpResponse =
-    (pixelExpected, bounce) match {
-      case (true, true) => HttpResponse(StatusCodes.Found)
-      case (true, false) =>
+  def buildUsualHttpResponse(
+    pixelExpected: Boolean,
+    bounce: Boolean,
+    analyticsJsEvent: Option[AnalyticsJsBridge.Event] = None,
+    amplitudeEvent: Option[AmplitudeBridge.AmplitudeEvent] = None
+  ): HttpResponse =
+    (pixelExpected, bounce, analyticsJsEvent, amplitudeEvent) match {
+      case (true, true, _, _) => HttpResponse(StatusCodes.Found)
+      case (true, false, _, _) =>
         HttpResponse(entity =
           HttpEntity(contentType = ContentType(MediaTypes.`image/gif`), bytes = CollectorService.pixel)
         )
+      // analytics.js compatible response
+      case (_, _, Some(_), _) =>
+        HttpResponse(entity = AnalyticsJsBridge.jsonResponse.noSpaces)
+      // amplitude compatible response
+      case (_, _, _, Some(_)) =>
+        HttpResponse(entity = AmplitudeBridge.jsonResponse.noSpaces)
       // See https://github.com/snowplow/snowplow-javascript-tracker/issues/482
-      case _ => HttpResponse(entity = "ok")
+      case _ =>
+        HttpResponse(entity = "ok")
     }
 
   /** Builds the appropriate http response when dealing with click redirects. */
@@ -332,8 +397,7 @@ class CollectorService(
       }
     }
 
-  /**
-    * Builds a cookie header with the network user id as value.
+  /** Builds a cookie header with the network user id as value.
     * @param cookieConfig cookie configuration extracted from the collector configuration
     * @param networkUserId value of the cookie
     * @param doNotTrack whether do not track is enabled or not
@@ -354,13 +418,13 @@ class CollectorService(
         case None =>
           cookieConfig.map { config =>
             val responseCookie = HttpCookie(
-              name      = config.name,
-              value     = networkUserId,
-              expires   = Some(DateTime.now + config.expiration.toMillis),
-              domain    = cookieDomain(request.headers, config.domains, config.fallbackDomain),
-              path      = Some("/"),
-              secure    = config.secure,
-              httpOnly  = config.httpOnly,
+              name = config.name,
+              value = networkUserId,
+              expires = Some(DateTime.now + config.expiration.toMillis),
+              domain = cookieDomain(request.headers, config.domains, config.fallbackDomain),
+              path = Some("/"),
+              secure = config.secure,
+              httpOnly = config.httpOnly,
               extension = config.sameSite.map(value => s"SameSite=$value")
             )
             `Set-Cookie`(responseCookie)
@@ -379,12 +443,13 @@ class CollectorService(
       val forwardedScheme = for {
         headerName  <- bounceConfig.forwardedProtocolHeader
         headerValue <- request.headers.find(_.lowercaseName == headerName.toLowerCase).map(_.value().toLowerCase())
-        scheme <- if (Set("http", "https").contains(headerValue)) {
-          Some(headerValue)
-        } else {
-          logger.warn(s"Header $headerName contains invalid protocol value $headerValue.")
-          None
-        }
+        scheme <-
+          if (Set("http", "https").contains(headerValue)) {
+            Some(headerValue)
+          } else {
+            logger.warn(s"Header $headerName contains invalid protocol value $headerValue.")
+            None
+          }
       } yield scheme
 
       val redirectUri = request
@@ -416,8 +481,7 @@ class CollectorService(
     if (pixelExpected) List(`Cache-Control`(`no-cache`, `no-store`, `must-revalidate`))
     else Nil
 
-  /**
-    * Determines the cookie domain to be used by inspecting the Origin header of the request
+  /** Determines the cookie domain to be used by inspecting the Origin header of the request
     * and trying to find a match in the list of domains specified in the config file.
     * @param headers The headers from the http request.
     * @param domains The list of cookie domains from the configuration.
@@ -442,8 +506,7 @@ class CollectorService(
   def extractHosts(origins: Seq[HttpOrigin]): Seq[String] =
     origins.map(origin => origin.host.host.address())
 
-  /**
-    * Ensures a match is valid.
+  /** Ensures a match is valid.
     * We only want matches where:
     * a.) the Origin host is exactly equal to the cookie domain from the config
     * b.) the Origin host is a subdomain of the cookie domain from the config.
@@ -453,8 +516,7 @@ class CollectorService(
   def validMatch(host: String, domain: String): Boolean =
     host == domain || host.endsWith("." + domain)
 
-  /**
-    * Gets the IP from a RemoteAddress. If ipAsPartitionKey is false, a UUID will be generated.
+  /** Gets the IP from a RemoteAddress. If ipAsPartitionKey is false, a UUID will be generated.
     * @param remoteAddress Address extracted from an HTTP request
     * @param ipAsPartitionKey Whether to use the ip as a partition key or a random UUID
     * @return a tuple of ip (unknown if it couldn't be extracted) and partition key
@@ -468,8 +530,7 @@ class CollectorService(
       case Some(ip) => (ip, if (ipAsPartitionKey) ip else UUID.randomUUID.toString)
     }
 
-  /**
-    * Gets the network user id from the query string or the request cookie.
+  /** Gets the network user id from the query string or the request cookie.
     * @param request Http request made
     * @param requestCookie cookie associated to the Http request
     * @return a network user id
@@ -484,8 +545,7 @@ class CollectorService(
       case None    => request.uri.query().get("nuid").orElse(requestCookie.map(_.value))
     }
 
-  /**
-    * Creates an Access-Control-Allow-Origin header which specifically allows the domain which made
+  /** Creates an Access-Control-Allow-Origin header which specifically allows the domain which made
     * the request
     * @param request Incoming request
     * @return Header allowing only the domain which made the request or everything
