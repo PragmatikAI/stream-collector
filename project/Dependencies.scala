@@ -30,8 +30,8 @@ object Dependencies {
     val jodaTime    = "2.12.7"
     val slf4j       = "2.0.16"
     val config      = "1.4.3"
-    val rabbitMQ    = "5.35.0"
-    val thrift      = "0.24.0"
+    val rabbitMQ    = "5.36.0" // 5.36.0 patches CVE-2026-106122 (DoS via malformed short string)
+    val thrift      = "0.25.0" // 0.25.0 patches CVE-2026-82458; 0.24.0 patched CVE-2026-45112 et al.
     val jnrUnixsock = "0.38.22"
     val commonsLang = "3.18.0"
     val httpclient5 = "5.6.5"
